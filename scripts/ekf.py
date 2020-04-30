@@ -3,8 +3,11 @@
 import rospy
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
+from geometry_msgs.msg import Point, Pose, Quaternion, Twist, Vector3
+from std_msgs.msg import *
 import numpy as np
 import math
+import tf
 
 # Global Variables
 initilization = True
@@ -12,8 +15,30 @@ initilization = True
 class EKF:
 	def __init__(self):
 		global initialization
+		self.frame_id = "world"
+		# Tunables: Q_t and P_0
+		sigma_x = 0.05 # m^2
+		sigma_y = 0.05 # m^2
+		sigma_theta = 0.01 # rad
+		sigma_x_dot = 0.5 # m^2/s
+		sigma_y_dot = 0.5 # m^2/s
+		self.Q_t = np.array([[sigma_x^2, 0., 0., 0., 0.],[0. sigma_y^2, 0., 0., 0.],[0., 0., sigma_theta^2, 0., 0.],[0., 0., 0., sigma_x_dot, 0.],[0., 0., 0., 0., sigma_y_dot]])
+		
+		self.P_0 = 0.1*np.identity([5,5])
+
+		# Estimated by sensor outputs
+		sigma_r_x = 0.005 # m^2
+		sigma_r_y = 0.005 # m^2
+		sigma_r_theta = 0.005 # rad
+		sigma_r_x_dot = 0.1 # m^2/s
+		sigma_r_y_dot = 0.1 # m^2/s
+		self.R_t = np.array([[sigma_r_x^2, 0., 0.],[0., sigma_r_y^2, 0.],[0., 0., sigma_r_theta^2]])
+		self.R_t_vel = np.array([[sigma_r_x^2, 0., 0., 0., 0.],[0. sigma_r_y^2, 0., 0., 0.],[0., 0., sigma_r_theta^2, 0., 0.],[0., 0., 0., sigma_r_x_dot, 0.],[0., 0., 0., 0., sigma_r_y_dot]])
+		
+		# Subscribers and Publishers
 		self.odom_sub = rospy.Subscriber('cart_odom', Odometry, self.odom_callback)
-		self.filted_output = rospy.Subscriber('filter_out', Odometry, self.odom_callback)
+		self.filter_output_pub = rospy.Publisher('filter_out', Odometry, queue_size = 100)
+		self.P_publish = rospy.Publisher('covariance_matrix', float64[25], queue_size = 100)
 			
 	def jacobian(self,x,u,delta_t):
 		s = np.sqrt([x[3]^2+x[4]^2])
@@ -81,9 +106,23 @@ class EKF:
 		global initilization, slow_vel_count
 		if(initilization)
 			initialization = false
-			# Establish x_0,P_0
-			self.x_hat_k_plus_one_plus
-			self.P_k_plus_one_plus
+			# Establish x_0
+			self.x_hat_k_plus_one_plus = np.empty([5,1])
+			self.x_hat_k_plus_one_plus[0] = odom_msg.pose.pose.position.x
+			self.x_hat_k_plus_one_plus[1] = odom_msg.pose.pose.position.y
+			orientation_quat = odom.pose.pose.orientation
+			orientation_euler = tf.transformations.euler_form_quaternion([orientation_quat.x, orientation_quat.y, orientation_quat.z, orientation_quat.w])
+			self.x_hat_k_plus_one_plus[2] = orientation_euler[2]	
+			self.x_hat_k_plus_one_plus[3] = 0
+			self.x_hat_k_plus_one_plus[4] = 0
+
+			# P_0
+			self.P_k_plus_one_plus = self.P_0
+
+			self.time_prev = odom.header.stamp
+		time_curr = odom.header.stamp
+		delta_t = time_curr - time_prev
+
 
 		# Establish u_k from imu_msg 
 		imu_msg = rospy.wait_for_mesage("/L01/imu_raw", Imu)
@@ -127,10 +166,23 @@ class EKF:
 			y = y_new
 
 		# Given measurements, correct x_hat estimate
-		self.x_hat_k_plus_one_plus,self.P_k_plus_one_plus = self.correct(y,x_hat_k_plus_one_minus,P_k_plus_one_minus,R_t)
+		if (size(y) == 5):
+			self.x_hat_k_plus_one_plus,self.P_k_plus_one_plus = self.correct(y,x_hat_k_plus_one_minus,P_k_plus_one_minus,R_t_vel)
+		else:
+			self.x_hat_k_plus_one_plus,self.P_k_plus_one_plus = self.correct(y,x_hat_k_plus_one_minus,P_k_plus_one_minus,R_t)
+		
+		odom_output = Odometry()
+		odom.header.stamp = time_curr
+		odom.header.frame_id = self.frame_id
+		rotation_quat = tf.transfomrations.quaternion_from_euler(0,0,x_hat_k_plus_one_plus[2])
+		odom_output.pose.pose = Pose(Point(x_hat_k_plus_one_plus[0], x_hat_k_plus_one_plus[1], 0), Quaternion(*rotation_quat))
+		odom_output.twist.twist = Twist(Vector3(x_hat_k_plus_one_plus[3], x_hat_k_plus_one_plus[4], 0), Vector3(0,0,u[0]))
 
-#	def imu_callback(self,imu):
-#		l = 1
+		filter_output_pub.publish(odom_output)
+		P_pub.publish(P_k_plus_one_plus.reshape(25))
+
+		self.time_prev = time_curr
+
 
 def main():
 	rospy.init_node('ekf', anonomyous=True)
