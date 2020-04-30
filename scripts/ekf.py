@@ -74,10 +74,10 @@ class EKF:
 			y = x[0:2]
 		return y		
 
-	def prediction(self,x,u,P,delta_t,Q_t):
+	def prediction(self,x,u,P,delta_t):
 		x_hat_k_plus_one_minus = self.f(x,u,delta_t)
 		F_tilde = self.jacobian(x,u,delta_t)
-		P_k_plus_one_minus = np.dot(F_tilde,np.dot(P,F_tilde.T)) + Q_t
+		P_k_plus_one_minus = np.dot(F_tilde,np.dot(P,F_tilde.T)) + self.Q_t
 		return x_hat_k_plus_one_minus,P_k_plus_one_minus
 		
 	def correction(self,y,x,P,R):
@@ -93,10 +93,10 @@ class EKF:
 						[0., 1., 0., 0., 0.],
 						[0., 0., 1., 0., 0.]])
 		e_y_k_plus_one = y-y_hat_k_plus_one_minus
-		temp_1 = np.dot(P,H)
-		temp_2 = np.dot(H,temp_1)+R
-		temp_3 = np.linalg.inv(temp_2)
-		K = np.dot(temp_1,temp_3)
+		C_xy = np.dot(P,H.T)
+		S_k_plus_one = np.dot(H,C_xy)+R
+		S_k_plus_one_inv = np.linalg.inv(S_k_plus_one)
+		K = np.dot(C_xy,S_k_plus_one_inv)
 		x_hat_k_plus_one_plus = x+np.dot(K,e_y_k_plus_one)
 		temp_4 = np.dot(K,H)
 		temp_5 = np.identity(temp_4.shape)-temp_4
@@ -133,7 +133,7 @@ class EKF:
 		u[2][0] = imu_msg.linear_acceleration.y
 
 		# Predict new x_hat
-		x_hat_k_plus_one_minus,P_k_plus_one_minus = self.predict(self.x_hat_k_plus_one_plus,u,self.P_k_plus_one_plus,delta_t,Q_t)
+		x_hat_k_plus_one_minus,P_k_plus_one_minus = self.predict(self.x_hat_k_plus_one_plus,u,self.P_k_plus_one_plus,delta_t)
 		
 		# Establish y_k+1 from odom msg
 		y = np.empty([3,1])
