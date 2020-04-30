@@ -13,7 +13,6 @@ class EKF:
 	def __init__(self):
 		global initialization
 		self.odom_sub = rospy.Subscriber('cart_odom', Odometry, self.odom_callback)
-#		self.imu_sub = rospy.Subscriber('/L01/imu_raw', Imu, self.imu_callback)
 		self.filted_output = rospy.Subscriber('filter_out', Odometry, self.odom_callback)
 			
 	def jacobian(self,x,u,delta_t):
@@ -42,8 +41,11 @@ class EKF:
 		x_hat_k_plus_one_minus[4] = x[4] + u[2]*delta_t
 		return x_hat_k_plus_one_minus
 
-	def h(self,x,delta_t):
-		y = x[0:2]
+	def h(self,x,delta_t, vel):
+		if vel:
+			y = x
+		else:
+			y = x[0:2]
 		return y		
 
 	def prediction(self,x,u,P,delta_t,Q_t):
@@ -53,10 +55,17 @@ class EKF:
 		return x_hat_k_plus_one_minus,P_k_plus_one_minus
 		
 	def correction(self,y,x,P,R):
-		y_hat_k_plus_one_minus = self.h(x,delta_t)
-		H = np.array([[1., 0., 0., 0., 0.],
-									[0., 1., 0., 0., 0.],
-									[0., 0., 1., 0., 0.]])
+		if y.size() == 5:
+			vel = 1
+		else:
+			vel = 0
+		y_hat_k_plus_one_minus = self.h(x,delta_t,vel)
+		if vel == 1:
+			H = np.identity(5)
+		else:
+			H = np.array([[1., 0., 0., 0., 0.],
+						[0., 1., 0., 0., 0.],
+						[0., 0., 1., 0., 0.]])
 		e_y_k_plus_one = y-y_hat_k_plus_one_minus
 		temp_1 = np.dot(P,H)
 		temp_2 = np.dot(H,temp_1)+R
@@ -68,14 +77,57 @@ class EKF:
 		P_k_plus_one_plus = np.dot(temp_5,P)
 		return x_hat_k_plus_one_plus,P_k_plus_one_plus
 
-	def odom_callback(self,odom):
-		global initilization, x_hat_k_plus_one_plus, P_k_plus
+	def odom_callback(self,odom_msg):
+		global initilization, slow_vel_count
 		if(initilization)
-			# establish x_0,P_0
-		# establish u_k from imu_msg 
-		x_hat_k_plus_one_minus,P_k_plus_one_minus = self.predict(x_hat_k_plus_one_plus,u,P_k_plus,delta_t,Q_t)
-		# establish y_k+1 from odom msg
-		x_hat_k_plus_one_plus,P_k_plus_one_plus = self.correct(y,x_hat_k_plu_one_minus,P_k_plus_one_minus,R_t)
+			initialization = false
+			# Establish x_0,P_0
+			self.x_hat_k_plus_one_plus
+			self.P_k_plus_one_plus
+
+		# Establish u_k from imu_msg 
+		imu_msg = rospy.wait_for_mesage("/L01/imu_raw", Imu)
+		u = np.empty([3,1])
+		u[0][0] = imu_msg.angular_velocity.z
+		u[1][0] = imu_msg.linear_acceleration.x
+		u[2][0] = imu_msg.linear_acceleration.y
+
+		# Predict new x_hat
+		x_hat_k_plus_one_minus,P_k_plus_one_minus = self.predict(self.x_hat_k_plus_one_plus,u,self.P_k_plus_one_plus,delta_t,Q_t)
+		
+		# Establish y_k+1 from odom msg
+		y = np.empty([3,1])
+		y[0][0] = odom_msg.pose.pose.position.x
+		y[1][0] = odom_msg.pose.pose.position.y
+		orientation_quat = odom.pose.pose.orientation
+		orientation_euler = tf.transformations.euler_form_quaternion([orientation_quat.x, orientation_quat.y, orientation_quat.z, orientation_quat.w])
+		y[2][0] = orientation_euler[2]
+
+		# Can possibly create fake velocities here?
+		if(slow_vel_count % 100):
+			# Find Current values
+			slow_time_curr = odom_msg.header.stamp
+			x_curr = y[0]
+			y_curr = y[1]
+			slow_time_delta = slow_time_curr - slow_time_prev
+
+			# Find velocitie estimates
+			x_vel = (x_curr - x_prev)/slow_time_delta
+			y_vel = (y_curr - y_prev)/slow_time_delta
+			y_new = np.empty([5,1])
+			y_new[0] = y[0]
+			y_new[1] = y[1]
+			y_new[2] = y[2]
+			y_new[3] = x_vel
+			y_new[4] = y_vel
+			# Set previous values to current values
+			x_prev = x_curr
+			y_prev = y_curr
+			slow_time_prev = slow_time_prev
+			y = y_new
+
+		# Given measurements, correct x_hat estimate
+		self.x_hat_k_plus_one_plus,self.P_k_plus_one_plus = self.correct(y,x_hat_k_plus_one_minus,P_k_plus_one_minus,R_t)
 
 #	def imu_callback(self,imu):
 #		l = 1
