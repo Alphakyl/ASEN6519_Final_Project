@@ -16,6 +16,7 @@ class EKF:
 	def __init__(self):
 		global initialization
 		self.frame_id = "world"
+
 		# Tunables: Q_t and P_0
 		sigma_x = 0.05 # m^2
 		sigma_y = 0.05 # m^2
