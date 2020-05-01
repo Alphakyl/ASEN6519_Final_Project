@@ -109,6 +109,13 @@ class GSF:
 		self.P_publish = rospy.Publisher('covariance_matrix', float64[25], queue_size = 100)
 
         self.M = 5
+
+        self.ekf_dict = {}
+        self.w_k_dict = {}
+        self.x_hat_k_plus_one_plus_dict = {}
+        self.P_k_plus_one_plus_dict = {}
+
+    def weight_update(self, w, y_hat_k_plus_one_minus, S_k_plus_one)
         
 
 
@@ -117,22 +124,26 @@ class GSF:
 		if(initilization):
             initialization = false
 			
-            ekf_dict = {}
-            w_k = {}
+            
             for i in range(self.M):
-                ekf_dict[i] = EKF(x_0,P_0)
+                # Establish initial weights
+                self.w_k_dict[i] = 1./self.M
+
                 # Establish x_0
-			    self.x_hat_k_plus_one_plus = np.empty([5,1])
-			    self.x_hat_k_plus_one_plus[0] = odom_msg.pose.pose.position.x
-			    self.x_hat_k_plus_one_plus[1] = odom_msg.pose.pose.position.y
+			    self.x_hat_k_plus_one_plus_dict[i] = np.empty([5,1])
+			    self.x_hat_k_plus_one_plus_dict[i][0] = odom_msg.pose.pose.position.x
+			    self.x_hat_k_plus_one_plus_dict[i][1] = odom_msg.pose.pose.position.y
 			    orientation_quat = odom.pose.pose.orientation
 			    orientation_euler = tf.transformations.euler_form_quaternion([orientation_quat.x, orientation_quat.y, orientation_quat.z, orientation_quat.w])
-			    self.x_hat_k_plus_one_plus[2] = orientation_euler[2]	
-			    self.x_hat_k_plus_one_plus[3] = 0
-			    self.x_hat_k_plus_one_plus[4] = 0
+			    self.x_hat_k_plus_one_plus_dict[i][2] = orientation_euler[2]	
+			    self.x_hat_k_plus_one_plus_dict[i][3] = 0
+			    self.x_hat_k_plus_one_plus_dict[i][4] = 0
 
-			    # P_0
+			    # Establish P_0
 			    self.P_k_plus_one_plus = self.P_0
+
+                # Initialize EKFs                
+                ekf_dict[i] = EKF(x_0,P_0)
 
 			self.time_prev = odom.header.stamp
 		time_curr = odom.header.stamp
