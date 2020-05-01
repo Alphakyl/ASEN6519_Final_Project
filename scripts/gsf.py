@@ -9,6 +9,9 @@ import numpy as np
 import math
 import tf
 
+from scipy import stats
+
+
 # Global Variables
 initilization = True
 
@@ -110,26 +113,46 @@ class GSF:
 
         self.M = 5
 
+        # Dictionary to hold EKFs
         self.ekf_dict = {}
+
+        # Dictionary to hold weights
         self.w_k_dict = {}
+        
+        # Dictionary to hold predicted updates
+        self.x_hat_k_plus_one_minus_dict = {}
+        self.P_k_plus_one_minus_dict = {}
+
+        # Dictionary to hold Corrected Updates
         self.x_hat_k_plus_one_plus_dict = {}
         self.P_k_plus_one_plus_dict = {}
-
-    def weight_update(self, w, y_hat_k_plus_one_minus, S_k_plus_one)
         
+        # Dictionary to hold predicted measurements        
+        self.y_hat_k_plus_one_minus_dict = {}
+        self.S_k_plus_one_dict = {}
+
+
+    def weight_update(self, y, y_hat_k_plus_one_minus, S_k_plus_one):
+        w_times_N = np.array(self.M,1)
+        for i in range(self.M):
+            w_times_N[i] = w_k_dict[i]*stats.multi_variate_normal(y,mean=y_hat_k_plus_one_minus[i], cov=S_k_plu_one[i])
+        sum_w_times_n = np.sum(w_times_N)
+        for i in range(self.M)
+            self.w_k_dict[i] = w_times_N[i]/sum_w_times_n
+
 
 
 	def odom_callback(self,odom_msg):
 		global initilization, slow_vel_count
 		if(initilization):
             initialization = false
-			
             
             for i in range(self.M):
                 # Establish initial weights
                 self.w_k_dict[i] = 1./self.M
 
                 # Establish x_0
+                # TODO: Determine GM for initialization
 			    self.x_hat_k_plus_one_plus_dict[i] = np.empty([5,1])
 			    self.x_hat_k_plus_one_plus_dict[i][0] = odom_msg.pose.pose.position.x
 			    self.x_hat_k_plus_one_plus_dict[i][1] = odom_msg.pose.pose.position.y
@@ -145,8 +168,9 @@ class GSF:
                 # Initialize EKFs                
                 ekf_dict[i] = EKF(x_0,P_0)
 
-			self.time_prev = odom.header.stamp
-		time_curr = odom.header.stamp
+			    self.time_prev = odom.header.stamp
+		
+        time_curr = odom.header.stamp
 		delta_t = time_curr - time_prev
         
         # Establish u_k from imu_msg 
@@ -156,4 +180,48 @@ class GSF:
 		u[1][0] = imu_msg.linear_acceleration.x
 		u[2][0] = imu_msg.linear_acceleration.y
         for i in range(self.M):
-            ekf_dict[i].EKF.prediction(x_hat_k_plus_one_plus_dict[i],u,P_k_plus_one_plus_dict[i])
+            ekf_dict[i].prediction(x_hat_k_plus_one_plus_dict[i],u,P_k_plus_one_plus_dict[i])
+        
+        # Establish y_k+1 from odom msg
+		y = np.empty([3,1])
+		y[0][0] = odom_msg.pose.pose.position.x
+		y[1][0] = odom_msg.pose.pose.position.y
+		orientation_quat = odom.pose.pose.orientation
+		orientation_euler = tf.transformations.euler_form_quaternion([orientation_quat.x, orientation_quat.y, orientation_quat.z, orientation_quat.w])
+		y[2][0] = orientation_euler[2]
+
+		# Can possibly create fake velocities here?
+		if(slow_vel_count % 100):
+			# Find Current values
+			slow_time_curr = odom_msg.header.stamp
+			x_curr = y[0]
+			y_curr = y[1]
+			slow_time_delta = slow_time_curr - slow_time_prev
+
+			# Find velocitie estimates
+			x_vel = (x_curr - x_prev)/slow_time_delta
+			y_vel = (y_curr - y_prev)/slow_time_delta
+			y_new = np.empty([5,1])
+			y_new[0] = y[0]
+			y_new[1] = y[1]
+			y_new[2] = y[2]
+			y_new[3] = x_vel
+			y_new[4] = y_vel
+			# Set previous values to current values
+			x_prev = x_curr
+			y_prev = y_curr
+			slow_time_prev = slow_time_prev
+			y = y_new
+
+		# Given measurements, correct x_hat estimate
+		for i in range(self.M):
+            if (size(y) == 5):
+			    self.x_hat_k_plus_one_plus_dict[i], self.P_k_plus_one_plus_dict[i], self.y_hat_k_plus_one_minus_dict[i], self.S_k_plus_one_dict[i] = \
+                ekf_dict[i].correct(y,x_hat_k_plus_one_minus,P_k_plus_one_minus,R_t_vel)
+		    else:
+			    self.x_hat_k_plus_one_plus_dict[i], self.P_k_plus_one_plus_dict[i], self.y_hat_k_plus_one_minus_dict[i], self.S_k_plus_one_dict[i] = \
+                ekf_dict[i].correct(y,x_hat_k_plus_one_minus,P_k_plus_one_minus,R_t)
+        
+        # Update weights
+        self.weight_update(self.w_k_dict, self.y_hat_k_plus_one_minus_dict, self.S_k_plus_one_dict)
+
