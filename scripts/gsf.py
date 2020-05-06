@@ -73,34 +73,45 @@ class EKF:
 			y = x[0:2]
 		return y		
 
-	def prediction(self,x,u,P,delta_t):
-		x_hat_k_plus_one_minus = self.f(x,u,delta_t)
-		F_tilde = self.jacobian(x,u,delta_t)
-		P_k_plus_one_minus = np.dot(F_tilde,np.dot(P,F_tilde.T)) + self.Q_t
-		return x_hat_k_plus_one_minus,P_k_plus_one_minus
+	def prediction(self,u,delta_t):
+		self.x_hat_k_plus_one_minus = self.f(self.x_hat_k_plus_one_plus,u,delta_t)
+		F_tilde = self.jacobian(self.x_hat_k_plus_one_plus,u,delta_t)
+		self.P_k_plus_one_minus = np.dot(F_tilde,np.dot(self.P_k_plus_one_plus,F_tilde.T)) + self.Q_t
 		
-	def correction(self,y,x,P,R):
+	def correction(self,y,delta_t):
 		if y.size() == 5:
-			vel = 1
+            vel = 1
+            R = R_t_vel
+            H = np.identity(5)
 		else:
-			vel = 0
-		y_hat_k_plus_one_minus = self.h(x,delta_t,vel)
-		if vel == 1:
-			H = np.identity(5)
-		else:
-			H = np.array([[1., 0., 0., 0., 0.],
+            vel = 0
+            R = R_t
+            H = np.array([[1., 0., 0., 0., 0.],
 						[0., 1., 0., 0., 0.],
 						[0., 0., 1., 0., 0.]])
-		e_y_k_plus_one = y-y_hat_k_plus_one_minus
-		C_xy = np.dot(P,H.T)
-		S_k_plus_one = np.dot(H,C_xy)+R
+		self.y_hat_k_plus_one_minus = self.h(self.x_hat_k_plus_one_minus,delta_t,vel)
+		e_y_k_plus_one = y-self.y_hat_k_plus_one_minus
+		C_xy = np.dot(self.P_k_plus_one_minus,H.T)
+		self.S_k_plus_one = np.dot(H,C_xy)+R
 		S_k_plus_one_inv = np.linalg.inv(S_k_plus_one)
 		K = np.dot(C_xy,S_k_plus_one_inv)
-		x_hat_k_plus_one_plus = x+np.dot(K,e_y_k_plus_one)
+		self.x_hat_k_plus_one_plus = x+np.dot(K,e_y_k_plus_one)
 		temp_4 = np.dot(K,H)
 		temp_5 = np.identity(temp_4.shape)-temp_4
-		P_k_plus_one_plus = np.dot(temp_5,P)
-		return x_hat_k_plus_one_plus, P_k_plus_one_plus, y_hat_k_plus_one_minus, S_k_plus_one
+		self.P_k_plus_one_plus = np.dot(temp_5,P)
+    
+    def get_x_hat_k_plus_one_plus():
+        return self.x_hat_k_plus_one_plus
+    
+    def get_y_hat_plus_one_minus():
+        return self.y_hat_k_plus_one_minus
+    
+    def get_P_k_plus_one_plus():
+        return self.P_k_plus_one_plus
+    
+    def get_S_k_plus_one():
+        return self.S_k_plus_one
+
 
 class GSF:
     def __init__(self):		
@@ -118,29 +129,14 @@ class GSF:
 
         # Dictionary to hold weights
         self.w_k_dict = {}
-        
-        # Dictionary to hold predicted updates
-        self.x_hat_k_plus_one_minus_dict = {}
-        self.P_k_plus_one_minus_dict = {}
 
-        # Dictionary to hold Corrected Updates
-        self.x_hat_k_plus_one_plus_dict = {}
-        self.P_k_plus_one_plus_dict = {}
-        
-        # Dictionary to hold predicted measurements        
-        self.y_hat_k_plus_one_minus_dict = {}
-        self.S_k_plus_one_dict = {}
-
-
-    def weight_update(self, y, y_hat_k_plus_one_minus, S_k_plus_one):
+    def weight_update(self, y):
         w_times_N = np.array(self.M,1)
         for i in range(self.M):
-            w_times_N[i] = w_k_dict[i]*stats.multi_variate_normal(y,mean=y_hat_k_plus_one_minus[i], cov=S_k_plu_one[i])
+            w_times_N[i] = w_k_dict[i]*stats.multi_variate_normal(y,mean=self.ekf_dict[i].get_y_hat_plus_one_minus(), cov=self.ekf_dict[i].get_S_k_plus_one())
         sum_w_times_n = np.sum(w_times_N)
         for i in range(self.M)
             self.w_k_dict[i] = w_times_N[i]/sum_w_times_n
-
-
 
 	def odom_callback(self,odom_msg):
 		global initilization, slow_vel_count
@@ -166,7 +162,7 @@ class GSF:
 			    self.P_k_plus_one_plus = self.P_0
 
                 # Initialize EKFs                
-                ekf_dict[i] = EKF(x_0,P_0)
+                self.ekf_dict[i] = EKF(x_0,P_0)
 
 			    self.time_prev = odom.header.stamp
 		
@@ -180,7 +176,7 @@ class GSF:
 		u[1][0] = imu_msg.linear_acceleration.x
 		u[2][0] = imu_msg.linear_acceleration.y
         for i in range(self.M):
-            ekf_dict[i].prediction(x_hat_k_plus_one_plus_dict[i],u,P_k_plus_one_plus_dict[i])
+            self.ekf_dict[i].prediction(u,delta_t)
         
         # Establish y_k+1 from odom msg
 		y = np.empty([3,1])
@@ -216,12 +212,10 @@ class GSF:
 		# Given measurements, correct x_hat estimate
 		for i in range(self.M):
             if (size(y) == 5):
-			    self.x_hat_k_plus_one_plus_dict[i], self.P_k_plus_one_plus_dict[i], self.y_hat_k_plus_one_minus_dict[i], self.S_k_plus_one_dict[i] = \
-                ekf_dict[i].correct(y,x_hat_k_plus_one_minus,P_k_plus_one_minus,R_t_vel)
+			    self.ekf_dict[i].correct(y, delta_t)
 		    else:
-			    self.x_hat_k_plus_one_plus_dict[i], self.P_k_plus_one_plus_dict[i], self.y_hat_k_plus_one_minus_dict[i], self.S_k_plus_one_dict[i] = \
-                ekf_dict[i].correct(y,x_hat_k_plus_one_minus,P_k_plus_one_minus,R_t)
+                self.ekf_dict[i].correct(y, delta_t)
         
         # Update weights
-        self.weight_update(self.w_k_dict, self.y_hat_k_plus_one_minus_dict, self.S_k_plus_one_dict)
+        self.weight_update(y, self.w_k_dict)
 
