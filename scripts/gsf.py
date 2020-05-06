@@ -211,11 +211,8 @@ class GSF:
 
 		# Given measurements, correct x_hat estimate
 		for i in range(self.M):
-            if (size(y) == 5):
-			    self.ekf_dict[i].correct(y, delta_t)
-		    else:
-                self.ekf_dict[i].correct(y, delta_t)
-        
+            self.ekf_dict[i].correct(y, delta_t)
+		    
         # Update weights
         self.weight_update(y, self.w_k_dict)
 
