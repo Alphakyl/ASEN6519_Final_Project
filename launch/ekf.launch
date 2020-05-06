@@ -5,8 +5,6 @@
 
 <node name="odom_pub" pkg="ASEN_Project" type="tf_2_odom"/>
 
-<include file="$(find ASEN_Project)/launch/robot_localization"/>
-
 <node name="EKF" pkg="ASEN_Project" type="ekf.py"/>
 
 <node name="playbag" pkg="rosbag" type="play" args="--clock $(find ASEN_Project)/bag/project_data.bag"
