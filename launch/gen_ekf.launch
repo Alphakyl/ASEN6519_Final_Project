@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+
+<launch>
+<param name="/use_sim_time" value="true"/>
+
+<node name="odom_pub" pkg="ASEN_Project" type="tf_2_odom"/>
+
+<node pkg="robot_localization" type="ekf_localization_node" name="gen_ekf", clear_params="true">
+    <rosparam command="load" file="$(find ASEN_Project)/params/gen_ekf.yaml"/>
+</node>
+
+<node name="playbag" pkg="rosbag" type="play" args="--clock $(find ASEN_Project)/bag/project_data.bag"
+</launch>
