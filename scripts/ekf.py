@@ -114,13 +114,15 @@ class EKF:
 
 class ros_odom_sub_pub:
 	def __init__(self):
+		self.initialization = 1
+		self.slow_vel_count = 0
 		# Subscribers and Publishers
 		self.odom_sub = rospy.Subscriber('cart_odom', Odometry, self.odom_callback)
 		self.filter_output_pub = rospy.Publisher('filter_out', Odometry, queue_size = 100)
 		self.P_publish = rospy.Publisher('covariance_matrix', float64[25], queue_size = 100)
 
 	def odom_callback(self,odom_msg):
-		global initilization, slow_vel_count
+		self.slow_vel_count += 1
 		if(initilization)
 			initialization = false
 			# Establish x_0
@@ -188,13 +190,13 @@ class ros_odom_sub_pub:
 		odom_output = Odometry()
 		odom.header.stamp = time_curr
 		odom.header.frame_id = self.frame_id
-		x_hat_k_plus_one_plus = self.ekf_obj.get_x_hat_k_plus_one_plus
+		x_hat_k_plus_one_plus = self.ekf_obj.get_x_hat_k_plus_one_plus()
 		rotation_quat = tf.transfomrations.quaternion_from_euler(0,0,x_hat_k_plus_one_plus[2])
 		odom_output.pose.pose = Pose(Point(x_hat_k_plus_one_plus[0], x_hat_k_plus_one_plus[1], 0), Quaternion(*rotation_quat))
 		odom_output.twist.twist = Twist(Vector3(x_hat_k_plus_one_plus[3], x_hat_k_plus_one_plus[4], 0), Vector3(0,0,u[0]))
 
 		filter_output_pub.publish(odom_output)
-		P_k_plus_one_plus = self.ekf_obj.get_P_k_plus_one_plus
+		P_k_plus_one_plus = self.ekf_obj.get_P_k_plus_one_plus()
 		P_pub.publish(P_k_plus_one_plus.reshape(25))
 
 		self.time_prev = time_curr

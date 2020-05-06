@@ -114,55 +114,81 @@ class EKF:
 
 
 class GSF:
-    def __init__(self):		
-    	self.frame_id = "world"
-
-        # Subscribers and Publishers
-		self.odom_sub = rospy.Subscriber('cart_odom', Odometry, self.odom_callback)
-		self.filter_output_pub = rospy.Publisher('filter_out', Odometry, queue_size = 100)
-		self.P_publish = rospy.Publisher('covariance_matrix', float64[25], queue_size = 100)
-
-        self.M = 5
+    def __init__(self,M,w):		
+        self.M = M
 
         # Dictionary to hold EKFs
         self.ekf_dict = {}
 
         # Dictionary to hold weights
-        self.w_k_dict = {}
+        self.w = w
+
+    def gsf_fill_dict(self, key, x_0, P_0):
+        self.ekf_dict[i] = EKF(x_0,P_0)
+
+    def gsf_predict(self,u,delta_t):
+        for i in range(self.M):
+            self.ekf_dict[i].prediction(u,delta_t)
+
+    def gsf_correct(self,y,delta_t):
+        for i in range(self.M):
+            self.ekf_dict[i].correct(y, delta_t)
 
     def weight_update(self, y):
         w_times_N = np.array(self.M,1)
         for i in range(self.M):
-            w_times_N[i] = w_k_dict[i]*stats.multi_variate_normal(y,mean=self.ekf_dict[i].get_y_hat_plus_one_minus(), cov=self.ekf_dict[i].get_S_k_plus_one())
+            w_times_N[i] = w[i]*stats.multi_variate_normal(y,mean=self.ekf_dict[i].get_y_hat_plus_one_minus(), cov=self.ekf_dict[i].get_S_k_plus_one())
         sum_w_times_n = np.sum(w_times_N)
-        for i in range(self.M)
-            self.w_k_dict[i] = w_times_N[i]/sum_w_times_n
+        for i in range(self.M):
+            self.w[i] = w_times_N[i]/sum_w_times_n
+
+    def get_mu():
+        mu = np.zeros(self.M,1)
+        for i in self.M:
+            mu += self.w[i]*self.ekf_dict[i].get_x_hat_k_plus_one_plus()
+        return mu
+
+    def get_sigma():
+        sigma = np.zeros(self.M,self.M)
+        for i in self.M:
+            P_tilde = self.ekf_dict[i].get_P_k_plus_one_plus + np.dot(self.ekf_dict[i].get_x_hat_k_plus_one_plus,self.ekf_dict[i].get_x_hat_k_plus_one_plus.T)
+            sigma += self.w[i]*P_tilde - np.dot(self.get_mu,self.get_mu.T)
+        return sigma
+
+
+class ros_odom_sub_pub:
+	def __init__(self):
+		self.initialization = 1
+		self.slow_vel_count = 0
+		# Subscribers and Publishers
+		self.odom_sub = rospy.Subscriber('cart_odom', Odometry, self.odom_callback)
+		self.filter_output_pub = rospy.Publisher('filter_out', Odometry, queue_size = 100)
+		self.P_publish = rospy.Publisher('covariance_matrix', float64[25], queue_size = 100)
+        self.M = 5
 
 	def odom_callback(self,odom_msg):
-		global initilization, slow_vel_count
-		if(initilization):
-            initialization = false
-            
+        self.slow_vel_count += 1
+		if(self.initilization):
+            self.initialization = 0
+            w_0 = 1./self.M*np.ones(5,1)
+            self.gsf_obj = GSF(self.M,w_0)
             for i in range(self.M):
-                # Establish initial weights
-                self.w_k_dict[i] = 1./self.M
-
                 # Establish x_0
                 # TODO: Determine GM for initialization
-			    self.x_hat_k_plus_one_plus_dict[i] = np.empty([5,1])
-			    self.x_hat_k_plus_one_plus_dict[i][0] = odom_msg.pose.pose.position.x
-			    self.x_hat_k_plus_one_plus_dict[i][1] = odom_msg.pose.pose.position.y
+			    x_0 = np.empty([5,1])
+			    x_0[0] = odom_msg.pose.pose.position.x
+			    x_0[1] = odom_msg.pose.pose.position.y
 			    orientation_quat = odom.pose.pose.orientation
 			    orientation_euler = tf.transformations.euler_form_quaternion([orientation_quat.x, orientation_quat.y, orientation_quat.z, orientation_quat.w])
-			    self.x_hat_k_plus_one_plus_dict[i][2] = orientation_euler[2]	
-			    self.x_hat_k_plus_one_plus_dict[i][3] = 0
-			    self.x_hat_k_plus_one_plus_dict[i][4] = 0
+			    x_0[2] = orientation_euler[2]	
+			    x_0[3] = 0
+			    x_0[4] = 0
 
 			    # Establish P_0
-			    self.P_k_plus_one_plus = self.P_0
+			    P_0 = 0.1*np.identity([5,5])
 
                 # Initialize EKFs                
-                self.ekf_dict[i] = EKF(x_0,P_0)
+                self.gsf_obj.gsf_fill_dict(i,x_0,P_0)
 
 			    self.time_prev = odom.header.stamp
 		
@@ -175,9 +201,8 @@ class GSF:
 		u[0][0] = imu_msg.angular_velocity.z
 		u[1][0] = imu_msg.linear_acceleration.x
 		u[2][0] = imu_msg.linear_acceleration.y
-        for i in range(self.M):
-            self.ekf_dict[i].prediction(u,delta_t)
-        
+        self.gsf_obj.gsf_predict(u,delta_t)
+
         # Establish y_k+1 from odom msg
 		y = np.empty([3,1])
 		y[0][0] = odom_msg.pose.pose.position.x
@@ -210,9 +235,32 @@ class GSF:
 			y = y_new
 
 		# Given measurements, correct x_hat estimate
-		for i in range(self.M):
-            self.ekf_dict[i].correct(y, delta_t)
-		    
-        # Update weights
-        self.weight_update(y, self.w_k_dict)
+		self.gsf_obj.gsf_correct(y,delta_t)
 
+        # Get and publish MMSE
+        odom_output = Odometry()
+		odom.header.stamp = time_curr
+		odom.header.frame_id = self.frame_id
+
+        mu_k_plus_one_plus = self.gsf_obj.get_mu()
+		rotation_quat = tf.transfomrations.quaternion_from_euler(0,0,mu_k_plus_one_plus[2])
+		odom_output.pose.pose = Pose(Point(mu_k_plus_one_plus[0], mu_k_plus_one_plus[1], 0), Quaternion(*rotation_quat))
+		odom_output.twist.twist = Twist(Vector3(mu_k_plus_one_plus[3], mu_k_plus_one_plus[4], 0), Vector3(0,0,u[0]))
+
+		filter_output_pub.publish(odom_output)
+		Sigma_k_plus_one_plus = self.gsf_obj.get_sigma()
+		P_pub.publish(Sigma_k_plus_one_plus.reshape(25))
+
+        self.time_prev = time_curr
+
+
+def main():
+	rospy.init_node('ekf', anonomyous=True)
+	my_ros = ros_odom_sub_pub()
+	rospy.spin()
+
+if __name__ == '__main__':	
+	try:
+		main()
+	except rospy.ROSInterruptException:
+		pass
