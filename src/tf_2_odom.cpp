@@ -17,6 +17,7 @@ int main(int argc, char** argv){
 			ros::Duration(1.0).sleep();
 		}
 		nav_msgs::Odometry odom_msg;
+		odom_msg.header.frame_id = "/map"
 		odom_msg.pose.pose.position.x = transform.getOrigin().x();	
 		odom_msg.pose.pose.position.y = transform.getOrigin().y();
 		odom_msg.pose.pose.position.z = transform.getOrigin().z();
