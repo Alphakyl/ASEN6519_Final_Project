@@ -228,10 +228,9 @@ class ros_odom_sub_pub:
 		x_hat_k_plus_one_plus = self.ekf_obj.get_x_hat_k_plus_one_plus()
 		rotation_quat = tf.transformations.quaternion_from_euler(0,0,x_hat_k_plus_one_plus[2])
 		odom_output.pose.pose = Pose(Point(x_hat_k_plus_one_plus[0], x_hat_k_plus_one_plus[1], 0), Quaternion(*rotation_quat))
+		
 		odom_output.twist.twist = Twist(Vector3(x_hat_k_plus_one_plus[3], x_hat_k_plus_one_plus[4], 0), Vector3(0,0,u[0]))
 
-		# rospy.loginfo("Publishing x")
-		self.filter_output_pub.publish(odom_output)
 		
 		s = self.ekf_obj.get_P_k_plus_one_plus()
 		P_msg = Float64MultiArray()
@@ -242,8 +241,16 @@ class ros_odom_sub_pub:
 		P_msg.layout.dim[1].size = 5
 		P_msg.layout.dim[1].stride = 5
 		P_msg.data = s.reshape(25)
+		
+		
 		# rospy.loginfo("Publishing y")
 		self.P_publish.publish(P_msg)
+
+		odom_output.pose.covariance[0] = s[0][0]
+		odom_output.pose.covariance[7] = s[1][1]
+		odom_output.pose.covariance[35] = s[2][2]
+		# rospy.loginfo("Publishing x")
+		self.filter_output_pub.publish(odom_output)
 
 		self.time_prev = time_curr
 
