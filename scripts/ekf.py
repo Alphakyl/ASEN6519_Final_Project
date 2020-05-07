@@ -55,12 +55,12 @@ class EKF:
 		F_tilde = np.identity(5)
 		A_tilde = np.zeros((5,5))
 		A_tilde[0,2] = -s*math.sin(x[2])
-		A_tilde[0,2] = s*math.cos(x[2])
+		A_tilde[1,2] = s*math.cos(x[2])
 		if(s > 0):
-			A_tilde[1,4] = x[4]*math.cos(x[3])/s
-			A_tilde[1,5] = x[5]*math.cos(x[3])/s
-			A_tilde[2,4] = x[4]*math.sin(x[3])/s
-			A_tilde[2,5] = x[5]*math.sin(x[3])/s
+			A_tilde[0,3] = x[3]*math.cos(x[2])/s
+			A_tilde[0,4] = x[4]*math.cos(x[2])/s
+			A_tilde[1,3] = x[3]*math.sin(x[2])/s
+			A_tilde[1,4] = x[4]*math.sin(x[2])/s
 		
 		F_tilde = np.identity(5)+A_tilde*delta_t
 		return F_tilde
@@ -85,6 +85,7 @@ class EKF:
 
 	def prediction(self,u,delta_t):
 		self.x_hat_k_plus_one_minus = self.f(self.x_hat_k_plus_one_plus,u,delta_t)
+		# print(np.isnan(self.x_hat_k_plus_one_minus))
 		F_tilde = self.jacobian(self.x_hat_k_plus_one_plus,u,delta_t)
 		self.P_k_plus_one_minus = np.dot(F_tilde,np.dot(self.P_k_plus_one_plus,F_tilde.T)) + self.Q_t
 		
@@ -106,6 +107,7 @@ class EKF:
 		S_k_plus_one_inv = np.linalg.inv(self.S_k_plus_one)
 		K = np.dot(C_xy,S_k_plus_one_inv)
 		self.x_hat_k_plus_one_plus = self.x_hat_k_plus_one_minus+np.dot(K,e_y_k_plus_one)
+		# print(np.isnan(self.x_hat_k_plus_one_plus))
 		temp_4 = np.dot(K,H)
 		temp_5 = np.eye(np.shape(temp_4)[0], np.shape(temp_4)[1])-temp_4
 		self.P_k_plus_one_plus = np.dot(temp_5,self.P_k_plus_one_minus)
@@ -133,10 +135,11 @@ class ros_odom_sub_pub:
 		self.P_publish = rospy.Publisher('covariance_matrix', Float64MultiArray, queue_size = 100)
 
 	def odom_callback(self,odom_msg):
-		rospy.loginfo("Enterd Callback")
+		# rospy.loginfo("Enterd Callback")
 		self.slow_vel_count += 1
+		# print self.slow_vel_count
 		if(self.initialization==1):
-			rospy.loginfo("Initializing EKF")
+			# rospy.loginfo("Initializing EKF")
 			self.initialization = 0
 			# Establish x_0
 			x_0 = np.empty((5,1))
@@ -155,13 +158,13 @@ class ros_odom_sub_pub:
 			self.slow_time_prev = odom_msg.header.stamp
 			self.x_prev = x_0[0]
 			self.y_prev = x_0[1]
-			rospy.loginfo("EKF Initialized")
+			# rospy.loginfo("EKF Initialized")
 			return
 
 		time_curr = odom_msg.header.stamp
 		d = time_curr - self.time_prev
 		delta_t = d.to_sec()
-
+		# print delta_t
 		# Establish u_k from imu_msg 
 		imu_msg = rospy.wait_for_message("/L01/imu_raw", Imu)
 		u = np.empty([3,1])
@@ -170,7 +173,7 @@ class ros_odom_sub_pub:
 		u[2][0] = imu_msg.linear_acceleration.y
 
 		# Predict new x_hat
-		rospy.loginfo("Predicting")
+		# rospy.loginfo("Predicting")
 		self.ekf_obj.prediction(u,delta_t)
 		
 		# Establish y_k+1 from odom msg
@@ -183,17 +186,25 @@ class ros_odom_sub_pub:
 
 		# Can possibly create fake velocities here?
 		if(self.slow_vel_count % 100 == 0):
-			rospy.loginfo("Adding velocity")
+			# rospy.loginfo("Adding velocity")
 			# Find Current values
 			slow_time_curr = odom_msg.header.stamp
 			x_curr = y[0]
 			y_curr = y[1]
+			
 			slow_time_delta = slow_time_curr - self.slow_time_prev
 			delta_t_slow = slow_time_delta.to_sec()
+			#print self.slow_time_prev
+			#print slow_time_curr
+			#print delta_t_slow
 
 			# Find velocitie estimates
-			x_vel = (x_curr - self.x_prev)/delta_t_slow
-			y_vel = (y_curr - self.y_prev)/delta_t_slow
+			if delta_t_slow > 0:
+				x_vel = (x_curr - self.x_prev)/delta_t_slow
+				y_vel = (y_curr - self.y_prev)/delta_t_slow
+			else:
+				x_vel = 0
+				y_vel = 0
 			y_new = np.empty([5,1])
 			y_new[0] = y[0]
 			y_new[1] = y[1]
@@ -207,11 +218,11 @@ class ros_odom_sub_pub:
 			y = y_new
 
 		# Given measurements, correct x_hat estimate
-		rospy.loginfo("Correcting")
+		# rospy.loginfo("Correcting")
 		self.ekf_obj.correction(y,delta_t)
 		
 		odom_output = Odometry()
-		#odom_output.header.stamp = time_curr
+		# odom_output.header.stamp = time_curr
 		odom_output.header.stamp = rospy.Time.now()
 		odom_output.header.frame_id = self.frame_id
 		x_hat_k_plus_one_plus = self.ekf_obj.get_x_hat_k_plus_one_plus()
@@ -219,7 +230,7 @@ class ros_odom_sub_pub:
 		odom_output.pose.pose = Pose(Point(x_hat_k_plus_one_plus[0], x_hat_k_plus_one_plus[1], 0), Quaternion(*rotation_quat))
 		odom_output.twist.twist = Twist(Vector3(x_hat_k_plus_one_plus[3], x_hat_k_plus_one_plus[4], 0), Vector3(0,0,u[0]))
 
-		rospy.loginfo("Publishing x")
+		# rospy.loginfo("Publishing x")
 		self.filter_output_pub.publish(odom_output)
 		
 		s = self.ekf_obj.get_P_k_plus_one_plus()
@@ -231,7 +242,7 @@ class ros_odom_sub_pub:
 		P_msg.layout.dim[1].size = 5
 		P_msg.layout.dim[1].stride = 5
 		P_msg.data = s.reshape(25)
-		rospy.loginfo("Publishing y")
+		# rospy.loginfo("Publishing y")
 		self.P_publish.publish(P_msg)
 
 		self.time_prev = time_curr
