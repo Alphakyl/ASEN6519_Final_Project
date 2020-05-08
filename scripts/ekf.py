@@ -8,6 +8,7 @@ from std_msgs.msg import *
 import numpy as np
 import math
 import tf
+import scipy.io
 
 # Global Variables
 initilization = True
@@ -133,6 +134,9 @@ class ros_odom_sub_pub:
 		self.odom_sub = rospy.Subscriber('cart_odom', Odometry, self.odom_callback)
 		self.filter_output_pub = rospy.Publisher('filter_out', Odometry, queue_size = 100)
 		self.P_publish = rospy.Publisher('covariance_matrix', Float64MultiArray, queue_size = 100)
+		self.x_store = np.empty([5,1])
+		self.P_store = np.empty([25,1])
+		self.y_store = np.empty([3,1])
 
 	def odom_callback(self,odom_msg):
 		# rospy.loginfo("Enterd Callback")
@@ -150,9 +154,10 @@ class ros_odom_sub_pub:
 			x_0[2] = orientation_euler[2]	
 			x_0[3] = 0
 			x_0[4] = 0
-
+			self.x_store[:] = x_0
 			# P_0
 			P_0 = 0.1*np.identity(5)
+			self.P_store[:] = P_0.reshape((25,1))
 			self.ekf_obj = EKF(x_0,P_0)
 			self.time_prev = odom_msg.header.stamp
 			self.slow_time_prev = odom_msg.header.stamp
@@ -183,7 +188,7 @@ class ros_odom_sub_pub:
 		orientation_quat = odom_msg.pose.pose.orientation
 		orientation_euler = tf.transformations.euler_from_quaternion([orientation_quat.x, orientation_quat.y, orientation_quat.z, orientation_quat.w])
 		y[2][0] = orientation_euler[2]
-
+		self.y_store = np.append(self.y_store,y,axis=1)
 		# Can possibly create fake velocities here?
 		if(self.slow_vel_count % 100 == 0):
 			# rospy.loginfo("Adding velocity")
@@ -226,6 +231,8 @@ class ros_odom_sub_pub:
 		odom_output.header.stamp = rospy.Time.now()
 		odom_output.header.frame_id = self.frame_id
 		x_hat_k_plus_one_plus = self.ekf_obj.get_x_hat_k_plus_one_plus()
+		self.x_store = np.append(self.x_store,x_hat_k_plus_one_plus,axis=1)
+		#print self.x_store
 		rotation_quat = tf.transformations.quaternion_from_euler(0,0,x_hat_k_plus_one_plus[2])
 		odom_output.pose.pose = Pose(Point(x_hat_k_plus_one_plus[0], x_hat_k_plus_one_plus[1], 0), Quaternion(*rotation_quat))
 		
@@ -233,6 +240,7 @@ class ros_odom_sub_pub:
 
 		
 		s = self.ekf_obj.get_P_k_plus_one_plus()
+		self.P_store = np.append(self.P_store,s.reshape(25,1),axis=1)
 		P_msg = Float64MultiArray()
 		P_msg.layout.dim.append(MultiArrayDimension())
 		P_msg.layout.dim[0].size = 5
@@ -253,7 +261,18 @@ class ros_odom_sub_pub:
 		self.filter_output_pub.publish(odom_output)
 
 		self.time_prev = time_curr
-
+		if(self.slow_vel_count % 1000 == 0):
+			print self.slow_vel_count
+		if(self.slow_vel_count==22000):
+			#print "Saving to ekf.mat"
+			#scipy.io.savemat('ekf',{'x': self.x_store, 'P': self.P_store})
+			self.odom_sub.unregister()
+			print "Save to csv"
+			np.savetxt("/home/kyle/catkin_ws/src/ASEN_Project/bag/ekf_y.csv",self.y_store,delimiter=",")
+			np.savetxt("/home/kyle/catkin_ws/src/ASEN_Project/bag/ekf_x.csv",self.x_store,delimiter=",")
+			np.savetxt("/home/kyle/catkin_ws/src/ASEN_Project/bag/ekf_P.csv",self.P_store,delimiter=",")
+			print "Save complete"
+			rospy.signal_shtudown("Ended EKF")
 
 def main():
 	rospy.init_node('ekf', anonymous=True)
